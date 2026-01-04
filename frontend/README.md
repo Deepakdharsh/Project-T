@@ -1,31 +1,3 @@
-## Turf Project (Monorepo)
-
-This repo contains:
-- **`frontend/`**: Next.js + Tailwind UI
-- **`backend/`**: Node.js + Express + TypeScript + MongoDB API
-
-### Run frontend
-
-```bash
-npm run frontend:dev
-```
-
-### Run backend
-
-```bash
-npm run backend:dev
-```
-
-### Seed backend data (optional)
-
-```bash
-npm run backend:seed
-```
-
-### Notes
-- Frontend env: set `NEXT_PUBLIC_API_BASE_URL` to your backend base URL (default used by code is `http://localhost:8080/api/v1`).
-- Backend env template: `backend/env.example` (copy to `backend/.env` locally).
-
 # Turf Project
 
 This is a [Next.js](https://nextjs.org/) project bootstrapped with TypeScript, Tailwind CSS, and ESLint.
@@ -67,5 +39,4 @@ To learn more about Next.js, take a look at the following resources:
 
 - [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
 - [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
 
