@@ -26,7 +26,7 @@ export interface Booking {
   totalPrice: number;
   gameId: string;
   gameName: string;
-  status: 'Confirmed' | 'Checked In' | 'Cancelled';
+  status: 'Payment Pending' | 'Confirmed' | 'Checked In' | 'Cancelled';
   user?: string;
   checkedInAt?: string | null;
   scanToken?: string;

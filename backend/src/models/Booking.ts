@@ -1,6 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 
-export type BookingStatus = 'Confirmed' | 'Checked In' | 'Cancelled';
+export type BookingStatus = 'Payment Pending' | 'Confirmed' | 'Checked In' | 'Cancelled';
 
 export interface BookingDoc {
   _id: mongoose.Types.ObjectId;
@@ -27,7 +27,7 @@ const bookingSchema = new Schema<BookingDoc>(
     slotIds: [{ type: Schema.Types.ObjectId, ref: 'Slot', required: true }],
     slotTimes: [{ type: String, required: true }],
     totalPrice: { type: Number, required: true, min: 0 },
-    status: { type: String, required: true, enum: ['Confirmed', 'Checked In', 'Cancelled'], default: 'Confirmed' },
+    status: { type: String, required: true, enum: ['Payment Pending', 'Confirmed', 'Checked In', 'Cancelled'], default: 'Confirmed' },
     userId: { type: Schema.Types.ObjectId, ref: 'User' },
     guestName: { type: String, trim: true },
     guestEmail: { type: String, trim: true, lowercase: true },

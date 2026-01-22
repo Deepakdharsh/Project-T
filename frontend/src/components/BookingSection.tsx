@@ -20,6 +20,31 @@ export const BookingSection = ({ masterSlots, bookings, closures, games, categor
   const [selectedCategory, setSelectedCategory] = useState(categories[0]?.id || '');
   const [selectedGame, setSelectedGame] = useState(games.find(g => g.categoryId === categories[0]?.id)?.id || '');
 
+  // When catalog data is fetched from backend, ids will change (ObjectIds instead of mock ids like "c1"/"g1").
+  // Keep the booking UI in sync so slots actually render from the fetched catalog.
+  useEffect(() => {
+    if (categories.length === 0) return;
+
+    const categoryExists = categories.some((c) => c.id === selectedCategory);
+    const nextCategoryId = categoryExists ? selectedCategory : categories[0].id;
+    if (nextCategoryId !== selectedCategory) {
+      setSelectedCategory(nextCategoryId);
+      setSelectedSlotIds([]);
+    }
+
+    if (games.length === 0) return;
+
+    const selectedGameObj = games.find((g) => g.id === selectedGame);
+    const gameMatchesCategory = selectedGameObj ? selectedGameObj.categoryId === nextCategoryId : false;
+    if (!selectedGameObj || !gameMatchesCategory) {
+      const firstGameForCategory = games.find((g) => g.categoryId === nextCategoryId) || games[0];
+      if (firstGameForCategory && firstGameForCategory.id !== selectedGame) {
+        setSelectedGame(firstGameForCategory.id);
+        setSelectedSlotIds([]);
+      }
+    }
+  }, [categories, games, selectedCategory, selectedGame]);
+
   useEffect(() => {
     const firstGameInCategory = games.find(g => g.categoryId === selectedCategory);
     if (firstGameInCategory) setSelectedGame(firstGameInCategory.id);

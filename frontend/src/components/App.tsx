@@ -125,23 +125,11 @@ export function App({
         window.scrollTo(0, 0);
     };
 
-    const handlePaymentSuccess = async () => {
-        if (!pendingBooking) return;
-        try {
-            const res = await api.createBooking(baseUrl, {
-                date: pendingBooking.date,
-                gameId: pendingBooking.gameId,
-                slotIds: pendingBooking.slots.map((s) => s.id),
-                paymentMethod: 'card',
-                guest: { name: 'Guest User' },
-            });
-            setBookings([res.booking, ...bookings]);
-            setConfirmedBooking(res.booking);
-            setCurrentView('success');
-            window.scrollTo(0, 0);
-        } catch (e: any) {
-            setToast({ type: 'error', title: 'Booking Failed', message: e?.message || 'Unable to create booking. Please try again.' });
-        }
+    const handlePaymentVerified = (booking: Booking) => {
+        setBookings([booking, ...bookings]);
+        setConfirmedBooking(booking);
+        setCurrentView('success');
+        window.scrollTo(0, 0);
     };
 
     return (
@@ -256,7 +244,7 @@ export function App({
             {currentView === 'payment' && pendingBooking && (
                 <PaymentInterface
                     bookingDetails={pendingBooking}
-                    onPaymentComplete={handlePaymentSuccess}
+                    onPaymentVerified={handlePaymentVerified}
                     onBack={() => setCurrentView('booking')}
                 />
             )}

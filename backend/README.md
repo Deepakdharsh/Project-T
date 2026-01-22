@@ -194,6 +194,90 @@ Fetch by booking code (used by admin check-in).
 
 ---
 
+## Payments (Razorpay) — UPI + Cards
+
+### Overview (secure flow)
+- Frontend **requests an order from backend** (frontend never creates Razorpay orders).
+- Frontend opens **Razorpay Checkout** with the returned `orderId` (UPI + cards enabled).
+- Frontend sends `{ bookingId, orderId, paymentId, signature }` to backend.
+- Backend verifies:
+  - HMAC signature
+  - payment belongs to the order
+  - status is `captured`
+  - amount matches what the server created
+- Only after verification:
+  - `Payment.paymentStatus = SUCCESS`
+  - `Booking.status = Confirmed`
+- Backend sends a **best-effort confirmation email** (email failure does not fail verification).
+
+### Required env
+- `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`
+- (Optional) SMTP: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+
+### `POST /api/v1/payments/create-order`
+Creates (or reuses) a Razorpay order and stores a `Payment` record with status `CREATED`.
+
+New booking:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/payments/create-order \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "date":"2026-01-03",
+    "gameId":"<GAME_ID>",
+    "slotIds":["<SLOT_ID_1>"],
+    "guest":{"name":"Guest User","email":"guest@example.com"}
+  }'
+```
+
+Existing booking:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/payments/create-order \
+  -H 'Content-Type: application/json' \
+  -d '{"bookingId":"BK-1234"}'
+```
+
+### `POST /api/v1/payments/verify`
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/payments/verify \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "bookingId":"BK-1234",
+    "orderId":"order_…",
+    "paymentId":"pay_…",
+    "signature":"…"
+  }'
+```
+
+---
+
+## Refunds (Admin)
+
+### `POST /api/v1/admin/payments/refunds`
+Initiates a Razorpay refund and stores a `Refund` record.
+
+Full refund:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/admin/payments/refunds \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"paymentId":"pay_…"}'
+```
+
+Partial refund:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/admin/payments/refunds \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"paymentId":"pay_…","amountRupees":250}'
+```
+
+---
+
 ## Contact (used by `/contact` page)
 
 ### `POST /api/v1/contact`

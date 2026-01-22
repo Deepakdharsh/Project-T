@@ -13,6 +13,7 @@ export async function createBooking(input: {
   slotIds: string[];
   userId?: string;
   guest?: { name: string; email?: string };
+  status?: 'Payment Pending' | 'Confirmed';
 }) {
   const game = await GameModel.findById(input.gameId).lean();
   if (!game) throw new ApiError(404, 'Game not found');
@@ -52,7 +53,7 @@ export async function createBooking(input: {
     slotIds: slots.map((s: any) => s._id),
     slotTimes: slots.map((s: any) => s.timeLabel),
     totalPrice,
-    status: 'Confirmed',
+    status: input.status || 'Confirmed',
     userId: input.userId,
     guestName: input.guest?.name ?? 'Guest User',
     guestEmail: input.guest?.email,

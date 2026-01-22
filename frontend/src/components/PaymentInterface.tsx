@@ -1,145 +1,127 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronRight, CreditCard, Lock } from 'lucide-react';
-import { 
-  formatCurrency, 
-  validateCard, 
-  validateExpiry, 
-  validateCVV, 
-  validateCardholderName,
-  formatCardNumber,
-  formatExpiry,
-  detectCardType,
-  getCVVLength
-} from '@/utils/validation';
-import type { BookingDetails } from '@/types';
+import { formatCurrency } from '@/utils/validation';
+import type { Booking, BookingDetails } from '@/types';
+import { api, getApiConfig } from '@/lib/api';
 
 interface PaymentInterfaceProps {
   bookingDetails: BookingDetails;
-  onPaymentComplete: () => void;
+  onPaymentVerified: (booking: Booking) => void;
   onBack: () => void;
 }
 
-export const PaymentInterface = ({ bookingDetails, onPaymentComplete, onBack }: PaymentInterfaceProps) => {
+type RazorpayCheckoutResponse = {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+};
+
+declare global {
+  interface Window {
+    Razorpay?: any;
+  }
+}
+
+export const PaymentInterface = ({ bookingDetails, onPaymentVerified, onBack }: PaymentInterfaceProps) => {
+  const { baseUrl } = getApiConfig();
   const [processing, setProcessing] = useState(false);
-  const [method, setMethod] = useState('card');
-  const [errors, setErrors] = useState<Record<string, string | null>>({});
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
-  const [formData, setFormData] = useState({
-    cardName: '',
-    cardNumber: '',
-    expiry: '',
-    cvv: ''
-  });
+  const [method, setMethod] = useState<'card' | 'upi'>('card');
+  const [guestName, setGuestName] = useState('Guest User');
+  const [guestEmail, setGuestEmail] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [serverBookingId, setServerBookingId] = useState<string | null>(null);
 
-  const cardType = detectCardType(formData.cardNumber);
-  const cvvLength = getCVVLength(formData.cardNumber);
+  const canPay = useMemo(() => {
+    if (!guestName.trim()) return false;
+    if (!guestEmail.trim()) return false;
+    return true;
+  }, [guestName, guestEmail]);
 
-  // Real-time validation
   useEffect(() => {
-    if (method === 'card' && Object.keys(touched).length > 0) {
-      const newErrors: Record<string, string | null> = {};
-      
-      if (touched.cardNumber) {
-        const cardError = validateCard(formData.cardNumber);
-        if (cardError) newErrors.cardNumber = cardError;
-      }
-      
-      if (touched.expiry) {
-        const expiryError = validateExpiry(formData.expiry);
-        if (expiryError) newErrors.expiry = expiryError;
-      }
-      
-      if (touched.cvv) {
-        const cvvError = validateCVV(formData.cvv, formData.cardNumber);
-        if (cvvError) newErrors.cvv = cvvError;
-      }
-      
-      if (touched.cardName) {
-        const nameError = validateCardholderName(formData.cardName);
-        if (nameError) newErrors.cardName = nameError;
-      }
-      
-      setErrors(newErrors);
-    }
-  }, [formData, touched, method]);
+    // Preload Razorpay script (best effort)
+    void loadRazorpayScript();
+  }, []);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    let formattedValue = value;
-
-    // Auto-format inputs
-    if (name === 'cardNumber') {
-      formattedValue = formatCardNumber(value);
-    } else if (name === 'expiry') {
-      formattedValue = formatExpiry(value);
-    } else if (name === 'cvv') {
-      // Only allow digits, limit to CVV length
-      formattedValue = value.replace(/\D/g, '').substring(0, cvvLength);
-    } else if (name === 'cardName') {
-      // Allow letters, spaces, hyphens, apostrophes
-      formattedValue = value.replace(/[^a-zA-Z\s'-]/g, '');
-    }
-
-    setFormData(prev => ({ ...prev, [name]: formattedValue }));
-    
-    // Clear error when user starts typing
-    if (errors[name]) {
-      setErrors(prev => ({ ...prev, [name]: null }));
-    }
-  };
-
-  const handleBlur = (field: string) => {
-    setTouched(prev => ({ ...prev, [field]: true }));
-  };
-
-  const validateForm = () => {
-    const newErrors: Record<string, string | null> = {};
-    
-    if (method === 'card') {
-      const cardError = validateCard(formData.cardNumber);
-      if (cardError) newErrors.cardNumber = cardError;
-
-      const expiryError = validateExpiry(formData.expiry);
-      if (expiryError) newErrors.expiry = expiryError;
-
-      const cvvError = validateCVV(formData.cvv, formData.cardNumber);
-      if (cvvError) newErrors.cvv = cvvError;
-
-      const nameError = validateCardholderName(formData.cardName);
-      if (nameError) newErrors.cardName = nameError;
-    }
-    
-    setErrors(newErrors);
-    setTouched({
-      cardNumber: true,
-      expiry: true,
-      cvv: true,
-      cardName: true
-    });
-    
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handlePay = (e: React.FormEvent) => {
+  const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateForm()) {
-      // Scroll to first error
-      const firstErrorField = Object.keys(errors)[0];
-      if (firstErrorField) {
-        const element = document.querySelector(`[name="${firstErrorField}"]`);
-        element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        (element as HTMLInputElement)?.focus();
-      }
+    if (processing) return;
+    setError(null);
+    if (!canPay) {
+      setError('Please enter your name and a valid email.');
       return;
     }
 
     setProcessing(true);
-    setTimeout(() => {
+    try {
+      const orderRes = await api.payments.createOrder(
+        baseUrl,
+        serverBookingId
+          ? { bookingId: serverBookingId }
+          : {
+              date: bookingDetails.date,
+              gameId: bookingDetails.gameId,
+              slotIds: bookingDetails.slots.map((s) => s.id),
+              guest: { name: guestName.trim(), email: guestEmail.trim().toLowerCase() },
+            }
+      );
+
+      if (!orderRes.razorpay.keyId) throw new Error('Razorpay key is not configured on server');
+      if (!serverBookingId) setServerBookingId(orderRes.booking.id);
+      await loadRazorpayScript();
+      if (!window.Razorpay) throw new Error('Razorpay Checkout failed to load');
+
+      const options = {
+        key: orderRes.razorpay.keyId,
+        amount: orderRes.razorpay.amount,
+        currency: orderRes.razorpay.currency,
+        name: 'Turf Booking',
+        description: `${bookingDetails.gameName} • ${bookingDetails.date}`,
+        order_id: orderRes.razorpay.orderId,
+        prefill: { name: guestName.trim(), email: guestEmail.trim().toLowerCase() },
+        method: { upi: true, card: true },
+        config: {
+          display: {
+            preferences: { show_default_blocks: true },
+          },
+        },
+        modal: {
+          ondismiss: () => {
+            setProcessing(false);
+          },
+        },
+        handler: async (resp: RazorpayCheckoutResponse) => {
+          try {
+            const verifyRes = await api.payments.verify(baseUrl, {
+              bookingId: orderRes.booking.id,
+              orderId: resp.razorpay_order_id,
+              paymentId: resp.razorpay_payment_id,
+              signature: resp.razorpay_signature,
+            });
+            onPaymentVerified(verifyRes.booking);
+          } catch (err: any) {
+            setError(err?.message || 'Payment verification failed.');
+            setProcessing(false);
+          }
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+
+      // Hint Razorpay to focus a method (still allows both).
+      if (method === 'upi') {
+        try {
+          rzp.update({ method: { upi: true } });
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Unable to start payment.');
       setProcessing(false);
-      onPaymentComplete();
-    }, 2000);
+    }
   };
 
   return (
@@ -172,146 +154,76 @@ export const PaymentInterface = ({ bookingDetails, onPaymentComplete, onBack }: 
               </button>
               <button 
                 type="button"
-                onClick={() => setMethod('gpay')}
-                className={`flex-1 p-4 border text-center transition-all ${method === 'gpay' ? 'bg-white border-white text-black' : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'}`}
+                onClick={() => setMethod('upi')}
+                className={`flex-1 p-4 border text-center transition-all ${method === 'upi' ? 'bg-white border-white text-black' : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'}`}
               >
-                <span className="text-sm font-bold uppercase tracking-wider">Google Pay</span>
+                <span className="text-sm font-bold uppercase tracking-wider">UPI</span>
               </button>
             </div>
 
-            {method === 'card' && (
-              <div className="space-y-6">
-                <div className="bg-black/30 border border-white/5 p-4 flex items-center gap-3">
-                  <Lock size={16} className="text-zinc-500" />
-                  <span className="text-xs text-zinc-400">Your payment information is encrypted and secure</span>
-                </div>
+            <div className="space-y-6">
+              <div className="bg-black/30 border border-white/5 p-4 flex items-center gap-3">
+                <Lock size={16} className="text-zinc-500" />
+                <span className="text-xs text-zinc-400">
+                  Payments are processed securely by Razorpay. We never collect card/UPI details on this site.
+                </span>
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2 flex items-center justify-between">
-                    <span>Card Number</span>
-                    {cardType && (
-                      <span className="text-[10px] text-zinc-600 uppercase">
-                        {cardType === 'visa' && 'Visa'}
-                        {cardType === 'mastercard' && 'Mastercard'}
-                        {cardType === 'amex' && 'American Express'}
-                        {cardType === 'discover' && 'Discover'}
-                      </span>
-                    )}
-                  </label>
-                  <div className="relative">
-                    <input 
-                      type="text" 
-                      name="cardNumber"
-                      value={formData.cardNumber}
-                      onChange={handleInputChange}
-                      onBlur={() => handleBlur('cardNumber')}
-                      placeholder="1234 5678 9012 3456" 
-                      maxLength={19}
-                      className={`w-full bg-black border p-4 text-white focus:border-white outline-none placeholder-zinc-600 appearance-none rounded-none font-mono text-lg ${errors.cardNumber ? 'border-red-500 focus:border-red-500' : touched.cardNumber && !errors.cardNumber ? 'border-green-500/50' : 'border-zinc-700'}`} 
-                    />
-                    {!errors.cardNumber && formData.cardNumber && (
-                      <CreditCard size={20} className="absolute right-4 top-1/2 -translate-y-1/2 text-green-500" />
-                    )}
-                  </div>
-                  {errors.cardNumber && (
-                    <span className="text-red-500 text-[10px] uppercase font-bold mt-1 block flex items-center gap-1">
-                      <span>⚠</span> {errors.cardNumber}
-                    </span>
-                  )}
-                  {touched.cardNumber && !errors.cardNumber && formData.cardNumber && (
-                    <span className="text-green-500 text-[10px] uppercase font-bold mt-1 block">✓ Valid card number</span>
-                  )}
-                </div>
-
-                <div className="flex gap-4">
-                  <div className="w-1/2">
-                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Expiry Date</label>
-                    <input 
-                      type="text" 
-                      name="expiry"
-                      value={formData.expiry}
-                      onChange={handleInputChange}
-                      onBlur={() => handleBlur('expiry')}
-                      placeholder="MM/YY" 
-                      maxLength={5}
-                      className={`w-full bg-black border p-4 text-white focus:border-white outline-none placeholder-zinc-600 appearance-none rounded-none font-mono ${errors.expiry ? 'border-red-500 focus:border-red-500' : touched.expiry && !errors.expiry ? 'border-green-500/50' : 'border-zinc-700'}`} 
-                    />
-                    {errors.expiry && (
-                      <span className="text-red-500 text-[10px] uppercase font-bold mt-1 block">⚠ {errors.expiry}</span>
-                    )}
-                    {touched.expiry && !errors.expiry && formData.expiry && (
-                      <span className="text-green-500 text-[10px] uppercase font-bold mt-1 block">✓ Valid</span>
-                    )}
-                  </div>
-                  <div className="w-1/2">
-                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2 flex items-center justify-between">
-                      <span>CVV</span>
-                      <span className="text-[10px] text-zinc-600">{cvvLength} digits</span>
-                    </label>
-                    <input 
-                      type="text" 
-                      name="cvv"
-                      value={formData.cvv}
-                      onChange={handleInputChange}
-                      onBlur={() => handleBlur('cvv')}
-                      placeholder={cardType === 'amex' ? '1234' : '123'} 
-                      maxLength={cvvLength}
-                      className={`w-full bg-black border p-4 text-white focus:border-white outline-none placeholder-zinc-600 appearance-none rounded-none font-mono ${errors.cvv ? 'border-red-500 focus:border-red-500' : touched.cvv && !errors.cvv ? 'border-green-500/50' : 'border-zinc-700'}`} 
-                    />
-                    {errors.cvv && (
-                      <span className="text-red-500 text-[10px] uppercase font-bold mt-1 block">⚠ {errors.cvv}</span>
-                    )}
-                    {touched.cvv && !errors.cvv && formData.cvv && (
-                      <span className="text-green-500 text-[10px] uppercase font-bold mt-1 block">✓ Valid</span>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Cardholder Name</label>
-                  <input 
-                    type="text" 
-                    name="cardName"
-                    value={formData.cardName}
-                    onChange={handleInputChange}
-                    onBlur={() => handleBlur('cardName')}
-                    placeholder="John Doe" 
-                    maxLength={50}
-                    className={`w-full bg-black border p-4 text-white focus:border-white outline-none placeholder-zinc-600 appearance-none rounded-none ${errors.cardName ? 'border-red-500 focus:border-red-500' : touched.cardName && !errors.cardName ? 'border-green-500/50' : 'border-zinc-700'}`} 
+                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Name</label>
+                  <input
+                    type="text"
+                    value={guestName}
+                    onChange={(e) => setGuestName(e.target.value)}
+                    placeholder="Your name"
+                    maxLength={80}
+                    className="w-full bg-black border border-zinc-700 p-4 text-white focus:border-white outline-none placeholder-zinc-600 appearance-none rounded-none"
                   />
-                  {errors.cardName && (
-                    <span className="text-red-500 text-[10px] uppercase font-bold mt-1 block">⚠ {errors.cardName}</span>
-                  )}
-                  {touched.cardName && !errors.cardName && formData.cardName && (
-                    <span className="text-green-500 text-[10px] uppercase font-bold mt-1 block">✓ Valid</span>
-                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Email</label>
+                  <input
+                    type="email"
+                    value={guestEmail}
+                    onChange={(e) => setGuestEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full bg-black border border-zinc-700 p-4 text-white focus:border-white outline-none placeholder-zinc-600 appearance-none rounded-none"
+                  />
+                  <p className="text-[10px] text-zinc-600 mt-1.5">We’ll send your confirmation to this email.</p>
                 </div>
               </div>
-            )}
 
-            {method === 'gpay' && (
-              <div className="bg-black border border-zinc-700 p-8 text-center animate-fade-in">
-                 <div className="flex flex-col items-center justify-center mb-6">
-                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-3">
-                       <span className="text-black font-black text-2xl tracking-tighter">G</span>
-                    </div>
-                    <p className="text-zinc-400 text-sm">Pay via Google Pay</p>
-                 </div>
-                 <input 
-                   type="text" 
-                   placeholder="Enter UPI ID (e.g. name@oksbi)" 
-                   className="w-full bg-zinc-900 border border-zinc-700 p-4 text-white outline-none placeholder-zinc-600 appearance-none rounded-none text-center font-mono" 
-                 />
-                 <p className="text-zinc-600 text-xs mt-4 uppercase tracking-widest">Or scan QR code at the venue</p>
-              </div>
-            )}
+              {method === 'card' && (
+                <div className="bg-black border border-zinc-700 p-6 flex items-center gap-4">
+                  <CreditCard size={18} className="text-zinc-400" />
+                  <div>
+                    <p className="text-sm font-bold uppercase tracking-widest">Pay by Card</p>
+                    <p className="text-xs text-zinc-500 mt-1">Visa, Mastercard, RuPay and more via Razorpay Checkout.</p>
+                  </div>
+                </div>
+              )}
+
+              {method === 'upi' && (
+                <div className="bg-black border border-zinc-700 p-6">
+                  <p className="text-sm font-bold uppercase tracking-widest">Pay by UPI</p>
+                  <p className="text-xs text-zinc-500 mt-1">Pay using UPI apps via Razorpay Checkout.</p>
+                </div>
+              )}
+
+              {error && (
+                <div className="bg-red-950/20 border border-red-900 p-4 text-xs text-red-300">
+                  {error}
+                </div>
+              )}
+            </div>
 
             <button 
               type="submit" 
-              disabled={processing}
+              disabled={processing || !canPay}
               className="w-full bg-white text-black py-5 text-sm font-bold uppercase tracking-widest hover:bg-zinc-200 transition-colors mt-8"
             >
-              {processing ? 'Processing...' : `Pay ${formatCurrency(bookingDetails.total)}`}
+              {processing ? 'Opening Razorpay…' : `Pay ${formatCurrency(bookingDetails.total)}`}
             </button>
           </form>
         </div>
@@ -319,4 +231,26 @@ export const PaymentInterface = ({ bookingDetails, onPaymentComplete, onBack }: 
     </div>
   );
 };
+
+async function loadRazorpayScript() {
+  if (typeof window === 'undefined') return;
+  if (window.Razorpay) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector('script[data-razorpay="checkout"]') as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener('load', () => resolve());
+      existing.addEventListener('error', () => reject(new Error('Failed to load Razorpay Checkout')));
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.setAttribute('data-razorpay', 'checkout');
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Razorpay Checkout'));
+    document.body.appendChild(script);
+  });
+}
 

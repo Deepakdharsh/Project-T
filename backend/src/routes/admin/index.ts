@@ -7,6 +7,7 @@ import { adminClosureRoutes } from './closureRoutes.js';
 import { adminAnalyticsRoutes } from './analyticsRoutes.js';
 import { adminScanRoutes } from './scanRoutes.js';
 import { adminCatalogRoutes } from './catalogRoutes.js';
+import { adminPaymentRoutes } from './paymentRoutes.js';
 
 export const adminRoutes = Router();
 
@@ -18,5 +19,6 @@ adminRoutes.use('/closures', adminClosureRoutes);
 adminRoutes.use('/analytics', adminAnalyticsRoutes);
 adminRoutes.use('/scans', adminScanRoutes);
 adminRoutes.use('/catalog', adminCatalogRoutes);
+adminRoutes.use('/payments', adminPaymentRoutes);
 
 

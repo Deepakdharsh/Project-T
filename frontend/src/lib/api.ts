@@ -96,6 +96,35 @@ export const api = {
     await fetch(`${baseUrl}/auth/logout`, { method: 'POST', credentials: 'include' });
   },
 
+  payments: {
+    async createOrder(
+      baseUrl: string,
+      input:
+        | { bookingId: string }
+        | { date: string; gameId: string; slotIds: string[]; guest: { name: string; email: string } }
+    ) {
+      return apiFetch<{
+        booking: Booking;
+        razorpay: { keyId: string | undefined; orderId: string; amount: number; currency: string };
+      }>(baseUrl, '/payments/create-order', { method: 'POST', body: JSON.stringify(input) });
+    },
+    async verify(baseUrl: string, input: { bookingId: string; orderId: string; paymentId: string; signature: string }) {
+      return apiFetch<{
+        booking: Booking;
+        payment: {
+          orderId: string;
+          paymentId?: string;
+          amount: number;
+          currency: string;
+          paymentMethod?: string;
+          paymentStatus: string;
+          refundedAmount: number;
+          createdAt: string;
+        };
+      }>(baseUrl, '/payments/verify', { method: 'POST', body: JSON.stringify(input) });
+    },
+  },
+
   admin: {
     async listBookings(baseUrl: string, token: string) {
       return apiFetch<{ bookings: Booking[] }>(baseUrl, '/admin/bookings', { token });
